@@ -8,6 +8,7 @@ const axios = require('axios');
 const qs = require('querystring');
 const path = require('path');
 const fs = require('fs');
+
 // Configuración de la aplicación
 const app = express();
 const port = process.env.PORT || 3000;
@@ -23,6 +24,16 @@ app.use(express.json());
 
 // Directorio para archivos estáticos (frontend)
 app.use(express.static('public'));
+
+// Asegurarse de que existe la carpeta temp
+const tempDir = path.join(__dirname, 'temp');
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+}
+
+// Ruta para servir estáticamente archivos de la carpeta temp
+// Esto permite acceder directamente a los archivos MP3 generados
+app.use('/downloads', express.static(tempDir));
 
 // Ruta para verificar estado del servidor
 app.get('/api/health', (req, res) => {
@@ -70,10 +81,6 @@ app.post('/api/spotify/token', async (req, res) => {
     }
 });
 
-// Ruta para buscar en YouTube (con caché)
-// Reemplaza la ruta de búsqueda en server.js con esta versión mejorada
-
-// Ruta para buscar en YouTube (con búsqueda mejorada)
 // Ruta para buscar en YouTube (versión simple y universal)
 app.get('/api/search-youtube', async (req, res) => {
     try {
@@ -116,6 +123,87 @@ app.get('/api/search-youtube', async (req, res) => {
             error: 'Error al buscar video',
             message: error.message 
         });
+    }
+});
+
+// Reemplaza la ruta /api/download con esta versión simplificada
+app.get('/api/download', async (req, res) => {
+    try {
+        const { videoId, title } = req.query;
+        
+        if (!videoId) {
+            return res.status(400).json({ error: 'Se requiere un ID de video' });
+        }
+
+        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+        console.log(`Iniciando descarga desde: ${videoUrl}`);
+        
+        // Sanitizar el título para el nombre del archivo
+        const sanitizedTitle = title 
+            ? title.replace(/[^\w\s-]/gi, '_').replace(/\s+/g, '_').substring(0, 100) 
+            : 'audio';
+        
+        // Crear un archivo temporal único
+        const fileName = `${sanitizedTitle}.mp3`;
+        const filePath = path.join(tempDir, fileName);
+        
+        try {
+            // Obtener información del video
+            console.log(`Obteniendo información para video ID: ${videoId}`);
+            const videoInfo = await playdl.video_info(videoUrl);
+            
+            if (!videoInfo) {
+                throw new Error('No se pudo obtener información del video');
+            }
+            
+            // Obtener el stream de audio
+            console.log('Obteniendo stream de audio...');
+            const audioStream = await playdl.stream(videoUrl, { quality: 140 });
+            
+            if (!audioStream || !audioStream.stream) {
+                throw new Error('No se pudo crear el stream de audio');
+            }
+            
+            // Crear un archivo
+            console.log(`Guardando en: ${filePath}`);
+            const fileWriter = fs.createWriteStream(filePath);
+            
+            // Manejar errores
+            audioStream.stream.on('error', (err) => {
+                console.error('Error en el stream:', err);
+                return res.status(500).send('Error al descargar el audio');
+            });
+            
+            fileWriter.on('error', (err) => {
+                console.error('Error al escribir archivo:', err);
+                return res.status(500).send('Error al guardar el archivo');
+            });
+            
+            // Cuando el archivo se ha escrito completamente
+            fileWriter.on('finish', () => {
+                console.log('Archivo guardado correctamente. Enviando al cliente...');
+                
+                // Enviar el archivo como descarga
+                res.download(filePath, fileName, (err) => {
+                    if (err) {
+                        console.error('Error al enviar archivo:', err);
+                    }
+                    
+                    // No eliminar el archivo inmediatamente
+                    // Lo haremos después con un cron job o similar
+                });
+            });
+            
+            // Pipe el stream al archivo
+            audioStream.stream.pipe(fileWriter);
+            
+        } catch (error) {
+            console.error('Error:', error);
+            res.status(500).send(`Error: ${error.message}`);
+        }
+    } catch (error) {
+        console.error('Error general:', error);
+        res.status(500).send('Error general en la descarga');
     }
 });
 
@@ -220,80 +308,75 @@ async function processQueue() {
     }
 }
 
-// Ruta para descargar audio de YouTube (simplificada)
-app.get('/api/download', async (req, res) => {
+// Ruta para verificar sistema y dependencias
+app.get('/api/system-check', async (req, res) => {
+    const results = {
+        system: {
+            node: process.version,
+            platform: process.platform,
+            tempDir: path.join(__dirname, 'temp'),
+            tempDirExists: fs.existsSync(path.join(__dirname, 'temp'))
+        },
+        dependencies: {
+            playdl: false,
+            ffmpeg: false,
+            axios: false
+        },
+        tests: {
+            youtubeSearch: false,
+            fileSystem: false
+        }
+    };
+    
+    // Verificar dependencias
     try {
-        const { videoId, title } = req.query;
+        // Probar play-dl
+        const playdlVersion = require('play-dl/package.json').version;
+        results.dependencies.playdl = playdlVersion;
         
-        if (!videoId) {
-            return res.status(400).json({ error: 'Se requiere un ID de video' });
-        }
-
-        const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
-        console.log(`Iniciando descarga desde: ${videoUrl}`);
-        
-        // Sanitizar el título para el nombre del archivo
-        const sanitizedTitle = title 
-            ? title.replace(/[^\w\s-]/gi, '_').replace(/\s+/g, '_').substring(0, 100) 
-            : 'audio';
-        
+        // Probar ffmpeg
         try {
-            // Obtener información del video usando play-dl
-            console.log(`Obteniendo información para video ID: ${videoId}`);
-            const videoInfo = await playdl.video_info(videoUrl);
-            
-            if (!videoInfo) {
-                throw new Error('No se pudo obtener información del video');
-            }
-            
-            console.log(`Información obtenida: ${videoInfo.video_details.title}`);
-            
-            // Obtener el stream de audio de mejor calidad
-            const audioStream = await playdl.stream(videoUrl, { 
-                quality: 0, // Mejor calidad
-                discordPlayerCompatibility: true // Asegura que sea compatible con más reproductores
-            });
-            
-            if (!audioStream) {
-                throw new Error('No se pudo crear el stream de audio');
-            }
-            
-            // Configurar encabezados de respuesta
-            res.setHeader('Content-Type', 'audio/mpeg');
-            res.setHeader('Content-Disposition', `attachment; filename="${sanitizedTitle}.mp3"`);
-            res.setHeader('Cache-Control', 'no-cache');
-            
-            // Enviar el stream directamente al cliente
-            console.log(`Enviando stream de audio...`);
-            audioStream.stream.pipe(res);
-            
-            // Manejar finalización del stream
-            audioStream.stream.on('end', () => {
-                console.log(`Descarga completada: ${sanitizedTitle}`);
-            });
-            
-        } catch (err) {
-            console.error(`Error procesando video: ${err.message}`);
-            
-            if (!res.headersSent) {
-                return res.status(500).json({
-                    error: 'Error al procesar video',
-                    message: err.message
-                });
-            }
+            const ffmpegPath = ffmpeg.path;
+            results.dependencies.ffmpeg = ffmpegPath || true;
+        } catch (e) {
+            results.dependencies.ffmpeg = `Error: ${e.message}`;
         }
         
-    } catch (error) {
-        console.error(`Error general: ${error.message}`);
-        
-        if (!res.headersSent) {
-            return res.status(500).json({
-                error: 'Error general',
-                message: error.message
-            });
-        }
+        // Probar axios
+        const axiosVersion = require('axios/package.json').version;
+        results.dependencies.axios = axiosVersion;
+    } catch (e) {
+        console.error('Error verificando dependencias:', e);
     }
-}); 
+    
+    // Probar sistema de archivos
+    try {
+        // Asegurar que existe el directorio temporal
+        if (!fs.existsSync(path.join(__dirname, 'temp'))) {
+            fs.mkdirSync(path.join(__dirname, 'temp'), { recursive: true });
+            results.system.tempDirExists = true;
+        }
+        
+        // Probar escritura de archivo
+        const testPath = path.join(__dirname, 'temp', 'test.txt');
+        fs.writeFileSync(testPath, 'test');
+        fs.unlinkSync(testPath);
+        results.tests.fileSystem = true;
+    } catch (e) {
+        results.tests.fileSystem = `Error: ${e.message}`;
+    }
+    
+    // Probar búsqueda en YouTube
+    try {
+        const searchResults = await playdl.search('test song', { limit: 1 });
+        results.tests.youtubeSearch = searchResults && searchResults.length > 0;
+    } catch (e) {
+        results.tests.youtubeSearch = `Error: ${e.message}`;
+    }
+    
+    // Enviar resultados
+    res.json(results);
+});
 
 // Iniciar servidor
 app.listen(port, () => {
@@ -303,4 +386,6 @@ app.listen(port, () => {
     console.log(`- POST /api/spotify/token - Obtener token de Spotify`);
     console.log(`- GET /api/search-youtube - Buscar videos en YouTube`);
     console.log(`- GET /api/download - Descargar y convertir a MP3`);
+    console.log(`- GET /api/system-check - Verificar estado del sistema`);
+    console.log(`- GET /downloads/[filename] - Acceder directamente a archivos MP3`);
 });

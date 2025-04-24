@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', function () {
     elements.backBtn.addEventListener('click', showSplashScreen);
     elements.contactBtn.addEventListener('click', openInstagram);
     elements.instagramBtn.addEventListener('click', openInstagram);
-    elements.spotifyConfigBtn.addEventListener('click', showAuthModal); // Añade esta línea
+    elements.spotifyConfigBtn.addEventListener('click', showAuthModal);
 
     // Event Listeners de acciones principales
     elements.fetchBtn.addEventListener('click', fetchFromSpotifyUrl);
@@ -88,10 +88,6 @@ document.addEventListener('DOMContentLoaded', function () {
         if (clientId && clientSecret) {
             elements.clientIdInput.value = clientId;
             elements.clientSecretInput.value = clientSecret;
-        }
-
-        // Iniciar con credenciales si están disponibles
-        if (clientId && clientSecret) {
             getSpotifyToken();
         }
     }
@@ -159,6 +155,16 @@ document.addEventListener('DOMContentLoaded', function () {
         } else {
             showNotification('Por favor ingresa ambas credenciales', 'error');
         }
+    }
+
+    /**
+     * Asegura que hay un token de Spotify disponible
+     */
+    async function ensureSpotifyToken() {
+        if (!state.spotifyToken) {
+            return await getSpotifyToken();
+        }
+        return state.spotifyToken;
     }
 
     /**
@@ -295,19 +301,6 @@ document.addEventListener('DOMContentLoaded', function () {
             showNotification(error.message || 'Error al obtener datos de Spotify', 'error');
             updateStatus('Error al obtener datos');
         }
-    }
-
-    /**
-     * Busca en Spotify según el tipo seleccionado
-     */
-    /**
-     * Asegura que hay un token de Spotify disponible
-     */
-    async function ensureSpotifyToken() {
-        if (!state.spotifyToken) {
-            return await getSpotifyToken();
-        }
-        return state.spotifyToken;
     }
 
     /**
@@ -500,184 +493,95 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     /**
- * Descarga una lista de canciones
- */
-    // Reemplaza la función downloadTracks en app.js con esta versión mejorada
+     * Descarga una canción individual
+     */
+    async function downloadTrack(track) {
+        try {
+            updateStatus(`Buscando: ${track}`);
+            
+            // 1. Buscar el video en YouTube
+            const searchResponse = await fetch(`${API_BASE_URL}/search-youtube?query=${encodeURIComponent(track)}`);
+            
+            if (!searchResponse.ok) {
+                throw new Error(`Error en la búsqueda: ${searchResponse.status}`);
+            }
+            
+            const searchData = await searchResponse.json();
+            
+            if (!searchData.success || !searchData.video) {
+                throw new Error(`No se encontró el video para: ${track}`);
+            }
+            
+            const videoId = searchData.video.id;
+            updateStatus(`Encontrado: ${searchData.video.title}`);
+            
+            // 2. Sanitizar título para el nombre del archivo
+            const sanitizedTitle = track.replace(/[^\w\s-]/gi, '_').replace(/\s+/g, '_');
+            
+            // 3. Construir URL para la descarga
+            const downloadUrl = `${API_BASE_URL}/download?videoId=${videoId}&title=${encodeURIComponent(sanitizedTitle)}`;
+            
+            // 4. Iniciar descarga
+            showNotification(`Iniciando descarga: ${track}`, 'success');
+            
+            // Versión simplificada: abrir en una nueva ventana
+            window.open(downloadUrl, '_blank');
+            
+            return true;
+        } catch (error) {
+            console.error('Error en la descarga:', error);
+            showNotification(`Error: ${error.message}`, 'error');
+            return false;
+        }
+    }
 
     /**
- * Descarga una lista de canciones
- */
+     * Descarga una lista de canciones
+     */
     async function downloadTracks(tracks) {
-        const useMetadata = elements.metadataCheckbox.checked;
-        const albumName = useMetadata ? state.currentAlbumName : null;
-        const total = tracks.length;
+        // Filtrar encabezados de álbum
+        const tracksToDownload = tracks.filter(track => !track.startsWith('ÁLBUM:'));
+        
+        if (tracksToDownload.length === 0) {
+            showNotification('No hay canciones para descargar', 'error');
+            return;
+        }
 
         // Desactivar botones durante la descarga
         elements.downloadSongBtn.disabled = true;
         elements.downloadPlaylistBtn.disabled = true;
 
         try {
-            for (let i = 0; i < tracks.length; i++) {
-                const track = tracks[i];
-                // Ignorar encabezados de álbum
-                if (track.startsWith('ÁLBUM:')) {
-                    continue;
-                }
-
+            // Descargar una canción a la vez para evitar bloqueos
+            for (let i = 0; i < tracksToDownload.length; i++) {
+                const track = tracksToDownload[i];
                 const current = i + 1;
-                updateCurrentTask(`Procesando (${current}/${total}): ${track}`);
-                updateProgress((current / total) * 100);
-                updateStatus('Buscando en YouTube...');
-
-                try {
-                    // Buscar el video en YouTube
-                    console.log(`Buscando en YouTube: ${track}`);
-                    const searchResponse = await fetch(`${API_BASE_URL}/search-youtube?query=${encodeURIComponent(track)}`);
-
-                    if (!searchResponse.ok) {
-                        throw new Error(`Error en la API: ${searchResponse.status}`);
-                    }
-
-                    const searchData = await searchResponse.json();
-                    console.log('Respuesta de búsqueda:', searchData);
-
-                    if (searchData.success && searchData.video) {
-                        const videoData = searchData.video;
-
-                        // Actualizar interfaz
-                        updateStatus(`Descargando ${current}/${total}: ${track}`);
-                        showNotification(`Iniciando descarga: ${track}`, 'success');
-
-                        // Crear URL de descarga
-                        const sanitizedTitle = track.replace(/[^\w\s-]/gi, '_').replace(/\s+/g, '_');
-                        const downloadUrl = `${API_BASE_URL}/download?videoId=${videoData.id}&title=${encodeURIComponent(sanitizedTitle)}`;
-
-                        // Iniciar descarga
-                        const downloadLink = document.createElement('a');
-                        downloadLink.href = downloadUrl;
-                        downloadLink.download = `${sanitizedTitle}.mp3`;
-                        downloadLink.style.display = 'none';
-                        document.body.appendChild(downloadLink);
-
-                        // Pequeño retraso para asegurar que funcione en todos los navegadores
-                        setTimeout(() => {
-                            downloadLink.click();
-
-                            // Limpiar después
-                            setTimeout(() => {
-                                document.body.removeChild(downloadLink);
-                            }, 1000);
-                        }, 200);
-
-                        updateStatus(`Descarga iniciada: ${track}`);
-
-                        // Esperar antes de continuar con la siguiente descarga
-                        if (i < tracks.length - 1) {
-                            await new Promise(resolve => setTimeout(resolve, 3000));
-                        }
-                    } else {
-                        updateStatus(`No se encontró: ${track}`);
-                        showNotification(`No se pudo encontrar "${track}" en YouTube.`, 'error');
-
-                        // Pequeña pausa antes de continuar
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    }
-                } catch (error) {
-                    console.error(`Error al procesar "${track}":`, error);
-                    updateStatus(`Error: ${error.message}`);
-                    showNotification(`Error al procesar "${track}": ${error.message}`, 'error');
-
-                    // Pequeña pausa antes de continuar
-                    await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                updateCurrentTask(`Procesando (${current}/${tracksToDownload.length}): ${track}`);
+                updateProgress((current / tracksToDownload.length) * 100);
+                
+                // Intentar descargar la canción
+                await downloadTrack(track);
+                
+                // Esperar 3 segundos entre descargas
+                if (i < tracksToDownload.length - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                 }
             }
         } catch (error) {
-            console.error('Error general:', error);
+            console.error('Error en el proceso:', error);
             showNotification(`Error en el proceso: ${error.message}`, 'error');
         } finally {
             // Reactivar botones
             elements.downloadSongBtn.disabled = false;
             elements.downloadPlaylistBtn.disabled = false;
-
+            
             updateCurrentTask('Proceso finalizado');
-            updateStatus(`Se procesaron ${total} canciones`);
+            updateStatus(`Se procesaron ${tracksToDownload.length} canciones`);
             updateProgress(100);
-
-            // Notificación final
-            if (total > 0) {
-                showNotification(`Proceso completado. Revisa tu carpeta de descargas.`, 'success');
-            }
+            
+            showNotification('Proceso completado. Revisa tus descargas.', 'success');
         }
-    }
-
-    /**
-     * Maneja la búsqueda manual cuando falla la automática
-     */
-    function handleManualSearch(track) {
-        return new Promise((resolve) => {
-            // Crear un modal para la búsqueda manual
-            const modalContainer = document.createElement('div');
-            modalContainer.className = 'fixed inset-0 bg-black bg-opacity-70 flex items-center justify-center z-50';
-            modalContainer.style.zIndex = '9999';
-
-            const modalContent = document.createElement('div');
-            modalContent.className = 'bg-gray-800 p-6 rounded-lg max-w-2xl w-full';
-
-            modalContent.innerHTML = `
-                <h2 class="text-xl font-bold mb-4">Búsqueda manual de YouTube</h2>
-                <p class="mb-4">No se pudo encontrar automáticamente: <strong>${track}</strong></p>
-                
-                <div class="mb-6">
-                    <p class="mb-2">Opciones:</p>
-                    <button id="open-search-btn" class="btn-primary px-4 py-2 rounded mb-2 w-full">
-                        Abrir búsqueda en YouTube
-                    </button>
-                    
-                    <div class="mt-4">
-                        <label class="block mb-2">O ingresa el ID del video de YouTube:</label>
-                        <input id="manual-video-id" type="text" class="spotify-input rounded w-full mb-2" 
-                            placeholder="Ejemplo: dQw4w9WgXcQ">
-                        <p class="text-xs text-gray-400 mb-4">
-                            (El ID es la parte después de "v=" en la URL del video de YouTube)
-                        </p>
-                    </div>
-                </div>
-                
-                <div class="flex justify-between">
-                    <button id="cancel-manual-btn" class="btn-secondary px-4 py-2 rounded">Cancelar</button>
-                    <button id="download-manual-btn" class="btn-primary px-4 py-2 rounded">Descargar</button>
-                </div>
-            `;
-
-            modalContainer.appendChild(modalContent);
-            document.body.appendChild(modalContainer);
-
-            // Añadir event listeners
-            document.getElementById('open-search-btn').addEventListener('click', () => {
-                window.open(`https://www.youtube.com/results?search_query=${encodeURIComponent(track)}`, '_blank');
-            });
-
-            document.getElementById('cancel-manual-btn').addEventListener('click', () => {
-                document.body.removeChild(modalContainer);
-                resolve({ success: false, cancelled: true });
-            });
-
-            document.getElementById('download-manual-btn').addEventListener('click', () => {
-                const videoId = document.getElementById('manual-video-id').value.trim();
-
-                if (!videoId) {
-                    alert('Por favor ingresa un ID de video válido');
-                    return;
-                }
-
-                document.body.removeChild(modalContainer);
-                resolve({
-                    success: true,
-                    videoId,
-                    manualEntry: true
-                });
-            });
-        });
     }
 
     /**

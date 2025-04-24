@@ -162,42 +162,63 @@ app.get('/api/download', async (req, res) => {
         const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
         console.log(`Iniciando descarga desde: ${videoUrl}`);
         
-        // Configurar encabezados para descarga
-        const sanitizedTitle = title ? title.replace(/[^\w\s]/gi, '_') : 'audio';
+        // Sanitizar el título para el nombre del archivo
+        const sanitizedTitle = title ? title.replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_') : 'audio';
+        
+        // Configurar encabezados para indicar al navegador que es una descarga
         res.setHeader('Content-Disposition', `attachment; filename="${sanitizedTitle}.mp3"`);
         res.setHeader('Content-Type', 'audio/mpeg');
+        res.setHeader('Cache-Control', 'no-cache');
         
-        // Verificar que el video existe antes de proceder
-        await ytdl.getBasicInfo(videoUrl);
-        
-        // Crear flujo de descarga desde YouTube con mejor manejo de errores
-        const videoStream = ytdl(videoUrl, { 
-            quality: 'highestaudio', 
-            filter: 'audioonly' 
-        });
-        
-        videoStream.on('error', (err) => {
-            console.error('Error en stream de YouTube:', err);
-            return res.status(500).json({ error: 'Error al descargar el video' });
-        });
-        
-        // Configurar flujo de ffmpeg con mejor manejo de errores
-        const ffmpegProcess = ffmpeg(videoStream)
-            .audioBitrate(192) // Reducir a 192 para mejor compatibilidad
-            .audioCodec('libmp3lame')
-            .format('mp3')
-            .on('error', (err) => {
-                console.error('Error en ffmpeg:', err);
-                return res.status(500).json({ error: 'Error al convertir audio' });
+        try {
+            // Verificar primero que el video existe
+            const info = await ytdl.getInfo(videoUrl);
+            
+            // Crear el stream de YouTube con opciones específicas
+            const videoStream = ytdl(videoUrl, { 
+                quality: 'highestaudio',
+                filter: 'audioonly'
             });
+            
+            // Configurar manejo de errores para el stream
+            videoStream.on('error', (err) => {
+                console.error('Error en stream de YouTube:', err);
+                if (!res.headersSent) {
+                    return res.status(500).send('Error al obtener video de YouTube');
+                }
+            });
+            
+            // Usar ffmpeg para convertir el stream directamente a MP3
+            ffmpeg(videoStream)
+                .audioBitrate(192)  // Calidad media para balance entre tamaño y calidad
+                .audioCodec('libmp3lame')
+                .format('mp3')
+                .on('start', () => {
+                    console.log(`Comenzando conversión para: ${sanitizedTitle}`);
+                })
+                .on('error', (err) => {
+                    console.error('Error en ffmpeg:', err);
+                    if (!res.headersSent) {
+                        return res.status(500).send('Error en la conversión de audio');
+                    }
+                })
+                .on('end', () => {
+                    console.log(`Conversión completada: ${sanitizedTitle}`);
+                })
+                .pipe(res);
+                
+        } catch (err) {
+            console.error('Error al obtener info del video:', err);
+            if (!res.headersSent) {
+                return res.status(404).send('Video no encontrado o no disponible');
+            }
+        }
         
-        // Enviar directamente al cliente
-        ffmpegProcess.pipe(res);
-        
-        console.log(`Descarga iniciada para: ${sanitizedTitle}`);
     } catch (error) {
         console.error('Error general en descarga:', error);
-        return res.status(500).json({ error: 'Error al procesar la descarga' });
+        if (!res.headersSent) {
+            return res.status(500).send('Error al procesar la descarga');
+        }
     }
 });
 

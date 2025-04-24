@@ -1,16 +1,13 @@
 // server.js - Backend completo para Listify
 const express = require('express');
 const cors = require('cors');
-const ytdl = require('ytdl-core');
-const { search } = require('youtube-search-without-api-key');
+const playdl = require('play-dl');
 const ffmpeg = require('fluent-ffmpeg');
 const NodeCache = require('node-cache');
 const axios = require('axios');
 const qs = require('querystring');
 const path = require('path');
 const fs = require('fs');
-const { promisify } = require('util');
-
 // Configuración de la aplicación
 const app = express();
 const port = process.env.PORT || 3000;
@@ -74,6 +71,10 @@ app.post('/api/spotify/token', async (req, res) => {
 });
 
 // Ruta para buscar en YouTube (con caché)
+// Reemplaza la ruta de búsqueda en server.js con esta versión mejorada
+
+// Ruta para buscar en YouTube (con búsqueda mejorada)
+// Ruta para buscar en YouTube (versión simple y universal)
 app.get('/api/search-youtube', async (req, res) => {
     try {
         const { query } = req.query;
@@ -81,54 +82,123 @@ app.get('/api/search-youtube', async (req, res) => {
             return res.status(400).json({ error: 'Se requiere un término de búsqueda' });
         }
 
-        // Ampliar la búsqueda para mejorar resultados
         console.log(`Buscando en YouTube: "${query}"`);
         
-        // Intentar primero con la consulta exacta
-        let results = await search(query, { limit: 3 });
+        // Realizar búsqueda con play-dl
+        const searchResults = await playdl.search(query, { 
+            limit: 1, 
+            source: { youtube: "video" } 
+        });
         
-        // Si no hay resultados, intentar con una búsqueda más amplia
-        if (!results || results.length === 0) {
-            console.log('No se encontraron resultados, intentando búsqueda alternativa');
-            
-            // Extraer posible artista y título
-            const parts = query.split(' - ');
-            if (parts.length > 1) {
-                const title = parts[0].trim();
-                const artist = parts[1].trim();
-                
-                // Probar con combinaciones alternativas
-                results = await search(`${title} ${artist}`, { limit: 3 });
-                
-                // Si aún no hay resultados, intentar sólo con el título
-                if (!results || results.length === 0) {
-                    results = await search(title, { limit: 3 });
-                }
-            }
-        }
-        
-        if (results && results.length > 0) {
-            console.log(`Se encontraron ${results.length} resultados para "${query}"`);
-            console.log(`Mejor resultado: ${results[0].title} (ID: ${results[0].id.videoId})`);
+        if (searchResults && searchResults.length > 0) {
+            const video = searchResults[0];
+            console.log(`Resultado encontrado: ${video.title} (ID: ${video.id})`);
             
             return res.json({
                 success: true,
                 video: {
-                    id: results[0].id.videoId,
-                    title: results[0].title,
-                    url: `https://www.youtube.com/watch?v=${results[0].id.videoId}`,
-                    thumbnail: results[0].thumbnail.url
+                    id: video.id,
+                    title: video.title,
+                    url: video.url,
+                    thumbnail: video.thumbnails[0]?.url || null
                 }
             });
         } else {
-            console.log(`No se encontraron resultados para "${query}" después de múltiples intentos`);
-            return res.json({ success: false, message: `No se encontró: ${query}` });
+            console.log(`No se encontraron resultados para "${query}"`);
+            return res.json({ 
+                success: false, 
+                message: `No se encontró: ${query}` 
+            });
         }
     } catch (error) {
         console.error('Error al buscar en YouTube:', error);
-        return res.status(500).json({ error: 'Error al buscar video' });
+        return res.status(500).json({ 
+            error: 'Error al buscar video',
+            message: error.message 
+        });
     }
 });
+
+// Función alternativa para buscar en YouTube directamente usando su HTML/página de resultados
+async function searchYouTubeAlternative(query) {
+    try {
+        // Sanitizar la consulta
+        const sanitizedQuery = encodeURIComponent(query);
+        const url = `https://www.youtube.com/results?search_query=${sanitizedQuery}`;
+        
+        console.log(`Realizando búsqueda alternativa en: ${url}`);
+        
+        const response = await axios.get(url);
+        const html = response.data;
+        
+        // Extraer datos JSON incrustados en el HTML de YouTube
+        const dataRegex = /var ytInitialData = (.+?);<\/script>/;
+        const match = html.match(dataRegex);
+        
+        if (!match || !match[1]) {
+            throw new Error('No se pudieron extraer datos del HTML');
+        }
+        
+        // Intentar parsear los datos
+        let data;
+        try {
+            data = JSON.parse(match[1]);
+        } catch (e) {
+            throw new Error(`Error al parsear datos: ${e.message}`);
+        }
+        
+        // Navegar por la estructura para encontrar videos
+        const contents = data?.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents || [];
+        
+        // Extraer información del primer contenido que generalmente son los resultados de búsqueda
+        let items = [];
+        for (const content of contents) {
+            if (content.itemSectionRenderer && content.itemSectionRenderer.contents) {
+                items = content.itemSectionRenderer.contents;
+                break;
+            }
+        }
+        
+        // Procesar los ítems para encontrar videos
+        const results = [];
+        for (const item of items) {
+            // Buscar videoRenderer que contiene la información del video
+            if (item.videoRenderer) {
+                const videoData = item.videoRenderer;
+                
+                // Extraer ID, título y miniatura
+                const videoId = videoData.videoId;
+                let title = '';
+                
+                // Extraer título de diferentes ubicaciones posibles
+                if (videoData.title && videoData.title.runs && videoData.title.runs.length > 0) {
+                    title = videoData.title.runs.map(run => run.text).join('');
+                }
+                
+                // Extraer URL de miniatura
+                let thumbnailUrl = '';
+                if (videoData.thumbnail && videoData.thumbnail.thumbnails && videoData.thumbnail.thumbnails.length > 0) {
+                    thumbnailUrl = videoData.thumbnail.thumbnails[0].url;
+                }
+                
+                // Añadir a resultados
+                if (videoId && title) {
+                    results.push({
+                        videoId: videoId,
+                        title: title,
+                        thumbnailUrl: thumbnailUrl
+                    });
+                }
+            }
+        }
+        
+        console.log(`Búsqueda alternativa encontró ${results.length} resultados`);
+        return results;
+    } catch (error) {
+        console.error('Error en búsqueda alternativa:', error);
+        return null;
+    }
+}
 
 // Cola de descargas para evitar sobrecargar el servidor
 const downloadQueue = [];
@@ -150,7 +220,7 @@ async function processQueue() {
     }
 }
 
-// Ruta para descargar audio de YouTube (streaming directo)
+// Ruta para descargar audio de YouTube (simplificada)
 app.get('/api/download', async (req, res) => {
     try {
         const { videoId, title } = req.query;
@@ -163,64 +233,67 @@ app.get('/api/download', async (req, res) => {
         console.log(`Iniciando descarga desde: ${videoUrl}`);
         
         // Sanitizar el título para el nombre del archivo
-        const sanitizedTitle = title ? title.replace(/[^\w\s]/gi, '_').replace(/\s+/g, '_') : 'audio';
-        
-        // Configurar encabezados para indicar al navegador que es una descarga
-        res.setHeader('Content-Disposition', `attachment; filename="${sanitizedTitle}.mp3"`);
-        res.setHeader('Content-Type', 'audio/mpeg');
-        res.setHeader('Cache-Control', 'no-cache');
+        const sanitizedTitle = title 
+            ? title.replace(/[^\w\s-]/gi, '_').replace(/\s+/g, '_').substring(0, 100) 
+            : 'audio';
         
         try {
-            // Verificar primero que el video existe
-            const info = await ytdl.getInfo(videoUrl);
+            // Obtener información del video usando play-dl
+            console.log(`Obteniendo información para video ID: ${videoId}`);
+            const videoInfo = await playdl.video_info(videoUrl);
             
-            // Crear el stream de YouTube con opciones específicas
-            const videoStream = ytdl(videoUrl, { 
-                quality: 'highestaudio',
-                filter: 'audioonly'
+            if (!videoInfo) {
+                throw new Error('No se pudo obtener información del video');
+            }
+            
+            console.log(`Información obtenida: ${videoInfo.video_details.title}`);
+            
+            // Obtener el stream de audio de mejor calidad
+            const audioStream = await playdl.stream(videoUrl, { 
+                quality: 0, // Mejor calidad
+                discordPlayerCompatibility: true // Asegura que sea compatible con más reproductores
             });
             
-            // Configurar manejo de errores para el stream
-            videoStream.on('error', (err) => {
-                console.error('Error en stream de YouTube:', err);
-                if (!res.headersSent) {
-                    return res.status(500).send('Error al obtener video de YouTube');
-                }
+            if (!audioStream) {
+                throw new Error('No se pudo crear el stream de audio');
+            }
+            
+            // Configurar encabezados de respuesta
+            res.setHeader('Content-Type', 'audio/mpeg');
+            res.setHeader('Content-Disposition', `attachment; filename="${sanitizedTitle}.mp3"`);
+            res.setHeader('Cache-Control', 'no-cache');
+            
+            // Enviar el stream directamente al cliente
+            console.log(`Enviando stream de audio...`);
+            audioStream.stream.pipe(res);
+            
+            // Manejar finalización del stream
+            audioStream.stream.on('end', () => {
+                console.log(`Descarga completada: ${sanitizedTitle}`);
             });
             
-            // Usar ffmpeg para convertir el stream directamente a MP3
-            ffmpeg(videoStream)
-                .audioBitrate(192)  // Calidad media para balance entre tamaño y calidad
-                .audioCodec('libmp3lame')
-                .format('mp3')
-                .on('start', () => {
-                    console.log(`Comenzando conversión para: ${sanitizedTitle}`);
-                })
-                .on('error', (err) => {
-                    console.error('Error en ffmpeg:', err);
-                    if (!res.headersSent) {
-                        return res.status(500).send('Error en la conversión de audio');
-                    }
-                })
-                .on('end', () => {
-                    console.log(`Conversión completada: ${sanitizedTitle}`);
-                })
-                .pipe(res);
-                
         } catch (err) {
-            console.error('Error al obtener info del video:', err);
+            console.error(`Error procesando video: ${err.message}`);
+            
             if (!res.headersSent) {
-                return res.status(404).send('Video no encontrado o no disponible');
+                return res.status(500).json({
+                    error: 'Error al procesar video',
+                    message: err.message
+                });
             }
         }
         
     } catch (error) {
-        console.error('Error general en descarga:', error);
+        console.error(`Error general: ${error.message}`);
+        
         if (!res.headersSent) {
-            return res.status(500).send('Error al procesar la descarga');
+            return res.status(500).json({
+                error: 'Error general',
+                message: error.message
+            });
         }
     }
-});
+}); 
 
 // Iniciar servidor
 app.listen(port, () => {

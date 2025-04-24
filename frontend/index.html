@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="es">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -67,7 +68,8 @@
             cursor: pointer;
         }
 
-        .track-item:hover, .track-item.selected {
+        .track-item:hover,
+        .track-item.selected {
             background-color: var(--spotify-green);
         }
 
@@ -86,7 +88,8 @@
         }
 
         /* Splash and Main screen */
-        #splash-screen, #main-screen {
+        #splash-screen,
+        #main-screen {
             min-height: 100vh;
             display: flex;
             flex-direction: column;
@@ -95,7 +98,7 @@
         #main-screen {
             display: none;
         }
-        
+
         /* Notificaciones */
         .notification {
             position: fixed;
@@ -105,38 +108,148 @@
             border-radius: 5px;
             color: white;
             max-width: 300px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
             transform: translateX(400px);
             transition: transform 0.3s ease-out;
             z-index: 1000;
         }
-        
+
         .notification.success {
             background-color: var(--spotify-green);
         }
-        
+
         .notification.error {
             background-color: #e74c3c;
         }
-        
+
         .notification.show {
             transform: translateX(0);
         }
+
+
+
+
+        /* Añade estos estilos en la sección <style> de index.html */
+
+        /* Mejoras para modales */
+        .modal-container {
+            position: fixed;
+            inset: 0;
+            background-color: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+            animation: fadeIn 0.2s ease-out;
+        }
+
+        .modal-content {
+            background-color: var(--spotify-dark-gray);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            width: 100%;
+            max-width: 500px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            animation: slideIn 0.3s ease-out;
+        }
+
+        /* Mejoras para notificaciones */
+        .notification {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 15px 20px;
+            border-radius: 5px;
+            color: white;
+            max-width: 350px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transform: translateY(100px);
+            transition: transform 0.3s ease-out;
+            z-index: 1000;
+        }
+
+        .notification.success {
+            background-color: var(--spotify-green);
+            border-left: 4px solid #19a149;
+        }
+
+        .notification.error {
+            background-color: #e74c3c;
+            border-left: 4px solid #c0392b;
+        }
+
+        .notification.show {
+            transform: translateY(0);
+        }
+
+        /* Animaciones */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateY(-30px);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* Mejoras para botones deshabilitados */
+        .btn-primary:disabled,
+        .btn-secondary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        /* Mejoras para inputs y listas */
+        .spotify-input:focus {
+            outline: none;
+            box-shadow: 0 0 0 2px var(--spotify-green);
+            transition: box-shadow 0.2s ease;
+        }
+
+        .track-item {
+            transition: background-color 0.2s ease;
+        }
+
+        .track-item.selected {
+            background-color: var(--spotify-green);
+            position: relative;
+        }
+
+        .track-item.selected::before {
+            content: '▶';
+            position: absolute;
+            left: 5px;
+        }
     </style>
 </head>
+
 <body>
     <!-- Splash Screen -->
     <div id="splash-screen" class="container mx-auto px-4">
         <div class="flex flex-col items-center justify-center flex-grow">
             <h1 class="text-6xl font-bold text-center my-8" style="color: var(--spotify-green);">🎵 Listify</h1>
-            <p class="text-xl text-center mb-12" style="color: var(--spotify-light-gray);">Tu música favorita, donde quieras</p>
-            
+            <p class="text-xl text-center mb-12" style="color: var(--spotify-light-gray);">Tu música favorita, donde
+                quieras</p>
+
             <div class="flex space-x-4 mb-16">
                 <button id="start-btn" class="btn-primary px-6 py-3 rounded">COMENZAR</button>
                 <button id="contact-btn" class="btn-secondary px-6 py-3 rounded">CONTACTO</button>
             </div>
         </div>
-        
+
         <footer class="py-4 text-center" style="color: var(--spotify-light-gray);">
             <p>Desarrollado por stef.dev_</p>
         </footer>
@@ -161,7 +274,8 @@
             <div class="mb-6">
                 <div class="flex flex-wrap md:flex-nowrap items-center space-y-2 md:space-y-0 md:space-x-2 mb-2">
                     <label class="text-white w-full md:w-auto">URL de Spotify:</label>
-                    <input type="text" id="spotify-url" class="spotify-input flex-grow rounded" placeholder="Pega la URL de una playlist o álbum de Spotify">
+                    <input type="text" id="spotify-url" class="spotify-input flex-grow rounded"
+                        placeholder="Pega la URL de una playlist o álbum de Spotify">
                     <button id="fetch-btn" class="btn-primary px-4 py-2 rounded whitespace-nowrap">Buscar</button>
                 </div>
             </div>
@@ -170,7 +284,8 @@
             <div class="mb-6">
                 <div class="flex flex-wrap md:flex-nowrap items-center space-y-2 md:space-y-0 md:space-x-2 mb-2">
                     <label class="text-white w-full md:w-auto">Buscar en Spotify:</label>
-                    <input type="text" id="search-input" class="spotify-input flex-grow rounded" placeholder="Busca canciones, artistas o álbumes">
+                    <input type="text" id="search-input" class="spotify-input flex-grow rounded"
+                        placeholder="Busca canciones, artistas o álbumes">
                     <select id="search-type" class="spotify-input rounded" style="width: auto;">
                         <option value="canciones">Canciones</option>
                         <option value="artistas">Artistas</option>
@@ -197,7 +312,8 @@
             <!-- Download Section -->
             <div class="mb-6">
                 <div class="flex flex-col md:flex-row md:items-center mb-4 space-y-2 md:space-y-0">
-                    <span id="destination-path" class="text-gray-400 mb-2 md:mb-0">Las descargas se guardarán en tu carpeta de descargas</span>
+                    <span id="destination-path" class="text-gray-400 mb-2 md:mb-0">Las descargas se guardarán en tu
+                        carpeta de descargas</span>
                     <div class="md:ml-auto">
                         <label class="inline-flex items-center">
                             <input type="checkbox" id="metadata-checkbox" class="form-checkbox" checked>
@@ -218,7 +334,8 @@
                 <div class="progress-bar">
                     <div id="progress-bar-fill" class="progress-bar-fill"></div>
                 </div>
-                <div id="status-text" class="text-sm mt-1" style="color: var(--spotify-light-gray);">Listo para descargar</div>
+                <div id="status-text" class="text-sm mt-1" style="color: var(--spotify-light-gray);">Listo para
+                    descargar</div>
             </div>
         </main>
 
@@ -234,28 +351,31 @@
         <div class="bg-gray-800 p-6 rounded-lg max-w-md w-full">
             <h2 class="text-xl font-bold mb-4">Configurar API de Spotify</h2>
             <p class="mb-4">Para utilizar Listify necesitas configurar tus credenciales de Spotify API:</p>
-            
+
             <div class="mb-4">
                 <label class="block mb-1">Client ID:</label>
-                <input id="client-id-input" type="text" class="spotify-input rounded w-full" placeholder="Tu Client ID de Spotify">
+                <input id="client-id-input" type="text" class="spotify-input rounded w-full"
+                    placeholder="Tu Client ID de Spotify">
             </div>
-            
+
             <div class="mb-6">
                 <label class="block mb-1">Client Secret:</label>
-                <input id="client-secret-input" type="password" class="spotify-input rounded w-full" placeholder="Tu Client Secret de Spotify">
+                <input id="client-secret-input" type="password" class="spotify-input rounded w-full"
+                    placeholder="Tu Client Secret de Spotify">
             </div>
-            
+
             <div class="flex justify-between">
                 <button id="cancel-auth-btn" class="btn-secondary px-4 py-2 rounded">Cancelar</button>
                 <button id="save-auth-btn" class="btn-primary px-4 py-2 rounded">Guardar</button>
             </div>
         </div>
     </div>
-    
+
     <!-- Sistema de notificaciones -->
     <div id="notification" class="notification"></div>
 
     <!-- Scripts -->
     <script src="app.js"></script>
 </body>
+
 </html>
